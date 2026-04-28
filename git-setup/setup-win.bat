@@ -38,7 +38,7 @@ rem "---------------------------------------------------"
 rem "目的: git pull時にマージコミットを作成する。"
 rem "概要: "
 rem "---------------------------------------------------"
-git config --local pull.rebase true
+git config --local pull.rebase false
 echo [設定] pull.rebase
 
 
