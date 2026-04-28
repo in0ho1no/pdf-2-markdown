@@ -16,9 +16,27 @@
 		// フォント設定
 		"editor.fontFamily": "Consolas, 'Meiryo UI','Courier New', monospace",
 
+		"editor.defaultFormatter": "charliermarsh.ruff",
+		"editor.formatOnSave": true,
+		"editor.codeActionsOnSave": {
+			"source.fixAll": "explicit",
+		},
+
+		"autoDocstring.docstringFormat": "google",
+
 		// VSCode標準のGit blame(行末に表示される最終コミット情報)を無効化
 		"git.blame.editorDecoration.enabled": false,
 		// GitLensのCurrent Line Blame(カーソル行に表示される履歴情報)を無効化
 		"gitlens.currentLine.enabled": false,
+
+		// 自動補完を無効化
+		"editor.suggestOnTriggerCharacters": false,
+		"editor.wordBasedSuggestions": "off",
+		"editor.inlineSuggest.enabled": false,
+		"editor.quickSuggestions": {
+			"other": "off",
+			"comments": "off",
+			"strings": "off",
+		},
 	}
 }
