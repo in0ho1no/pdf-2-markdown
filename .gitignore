@@ -247,3 +247,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+outputs/
+_converter_eval
