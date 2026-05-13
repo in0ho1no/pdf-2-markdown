@@ -91,11 +91,29 @@ def test_convert_pdf_to_markdown_strips_duplicate_title_heading(monkeypatch: pyt
 
 
 def test_convert_pdf_with_docling_stages_non_ascii_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """It should copy a non-ASCII-path PDF to a temp ASCII location before passing to Docling."""
+    """It should stage a non-ASCII input under an explicit ASCII parent directory."""
     source_pdf = tmp_path / '日本語_p1-2.pdf'
     source_pdf.write_bytes(b'%PDF-1.5')
 
+    ascii_root = tmp_path / 'ascii-root'
+    ascii_root.mkdir()
+
+    captured_dir: Path | None = None
     captured_paths: list[Path] = []
+
+    class FakeTemporaryDirectory:
+        def __init__(self, *, prefix: str, dir: Path) -> None:
+            nonlocal captured_dir
+            assert prefix == 'docling-input-'
+            captured_dir = dir
+            self.path = ascii_root / 'docling-input-fixed'
+            self.path.mkdir()
+
+        def __enter__(self) -> str:
+            return str(self.path)
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            return None
 
     class FakeDocument:
         def export_to_markdown(self, *, page_no: int) -> str:
@@ -111,13 +129,17 @@ def test_convert_pdf_with_docling_stages_non_ascii_path(monkeypatch: pytest.Monk
             captured_paths.append(path)
             return FakeConversionResult()
 
+    monkeypatch.setattr(pdf_to_markdown, 'get_ascii_staging_root', lambda: ascii_root)
+    monkeypatch.setattr(pdf_to_markdown, 'TemporaryDirectory', FakeTemporaryDirectory)
     monkeypatch.setattr(pdf_to_markdown, 'get_document_converter', lambda: FakeConverter())
 
     pages = pdf_to_markdown.convert_pdf_with_docling(source_pdf)
 
     assert len(pages) == 1
+    assert captured_dir == ascii_root
     assert len(captured_paths) == 1
     staged_path = captured_paths[0]
+    assert staged_path.parent == ascii_root / 'docling-input-fixed'
     assert str(staged_path).isascii()
     assert staged_path.name == 'input_staging_docling.pdf'
     assert staged_path != source_pdf

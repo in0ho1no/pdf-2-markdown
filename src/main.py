@@ -113,6 +113,23 @@ def requires_ascii_staging(pdf_path: Path) -> bool:
     return not str(pdf_path).isascii()
 
 
+def get_ascii_staging_root() -> Path:
+    """Return a writable ASCII-only directory for staging non-ASCII input paths."""
+    candidates = (
+        Path.cwd(),
+        Path(__file__).resolve().parent,
+        Path(__file__).resolve().parent.parent,
+    )
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_dir() and str(resolved).isascii():
+            return resolved
+
+    raise ConversionError(
+        'Non-ASCII input path requires an ASCII staging directory, but no ASCII candidate directory is available.',
+    )
+
+
 def build_frontmatter(pdf_path: Path, metadata: PdfMetadata) -> str:
     """Build Markdown frontmatter for RAG ingestion."""
     converter_version = importlib.metadata.version('docling')
@@ -164,8 +181,9 @@ def strip_leading_title_heading(markdown_text: str, title: str) -> str:
 def convert_pdf_with_docling(pdf_path: Path) -> list[MarkdownPage]:
     """Convert one PDF into per-page Markdown with Docling."""
     if requires_ascii_staging(pdf_path):
-        with TemporaryDirectory(prefix='docling-input-') as temp_dir:
-            # Fixed ASCII-only name avoids the same non-ASCII problem on the staged path itself.
+        staging_root = get_ascii_staging_root()
+        with TemporaryDirectory(prefix='docling-input-', dir=staging_root) as temp_dir:
+            # Fixed ASCII-only parent and filename avoid passing a non-ASCII path to Docling.
             staged_path = Path(temp_dir) / 'input_staging_docling.pdf'
             shutil.copy2(pdf_path, staged_path)
             result = get_document_converter().convert(staged_path)
