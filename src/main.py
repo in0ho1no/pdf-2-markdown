@@ -6,10 +6,12 @@ import argparse
 import hashlib
 import importlib.metadata
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from docling.document_converter import DocumentConverter
 
@@ -107,6 +109,11 @@ def get_document_converter() -> DocumentConverter:
     return DocumentConverter()
 
 
+def requires_ascii_staging(pdf_path: Path) -> bool:
+    """Return whether the path should be staged to an ASCII-only temp path."""
+    return any(ord(character) > 127 for character in str(pdf_path))
+
+
 def build_frontmatter(pdf_path: Path, metadata: PdfMetadata) -> str:
     """Build Markdown frontmatter for RAG ingestion."""
     converter_version = importlib.metadata.version('docling')
@@ -159,7 +166,14 @@ def convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[Markdo
     """Convert one PDF into per-page Markdown with Docling."""
     del show_progress
 
-    result = get_document_converter().convert(pdf_path)
+    if requires_ascii_staging(pdf_path):
+        with TemporaryDirectory(prefix='docling-input-') as temp_dir:
+            staged_path = Path(temp_dir) / 'input.pdf'
+            shutil.copy2(pdf_path, staged_path)
+            result = get_document_converter().convert(staged_path)
+    else:
+        result = get_document_converter().convert(pdf_path)
+
     page_count = len(result.pages)
     if page_count == 0:
         raise ConversionError(f'Docling returned no pages for: {pdf_path}')
