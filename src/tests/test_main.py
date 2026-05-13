@@ -23,18 +23,18 @@ def test_infer_metadata_from_split_filename() -> None:
 
 
 def test_convert_pdf_to_markdown_adds_rag_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """It should add frontmatter and page comments around PyMuPDF4LLM chunks."""
+    """It should add frontmatter and page comments around Docling pages."""
     source_pdf = tmp_path / '01_1._Introduction_p5-5.pdf'
     source_pdf.write_bytes(b'%PDF-1.5')
 
-    def fake_to_markdown(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        assert args == (str(source_pdf),)
-        assert kwargs == {'page_chunks': True, 'show_progress': False}
+    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+        assert pdf_path == source_pdf
+        assert show_progress is False
         return [
-            {'metadata': {'page_number': 1}, 'text': 'Chapter body'},
+            pdf_to_markdown.MarkdownPage(source_page=1, text='Chapter body'),
         ]
 
-    monkeypatch.setattr(pdf_to_markdown.pymupdf4llm, 'to_markdown', fake_to_markdown)
+    monkeypatch.setattr(pdf_to_markdown, 'convert_pdf_with_docling', fake_convert_pdf_with_docling)
 
     markdown, warnings = pdf_to_markdown.convert_pdf_to_markdown(source_pdf, pdf_to_markdown.ConvertOptions())
 
@@ -55,12 +55,14 @@ def test_convert_pdf_to_markdown_warns_when_page_range_does_not_match(monkeypatc
     source_pdf = tmp_path / '08-03-02_Load_and_run_Blink_p36-37.pdf'
     source_pdf.write_bytes(b'%PDF-1.5')
 
-    def fake_to_markdown(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+        assert pdf_path == source_pdf
+        assert show_progress is False
         return [
-            {'metadata': {'page_number': 1}, 'text': 'Only one chunk'},
+            pdf_to_markdown.MarkdownPage(source_page=1, text='Only one chunk'),
         ]
 
-    monkeypatch.setattr(pdf_to_markdown.pymupdf4llm, 'to_markdown', fake_to_markdown)
+    monkeypatch.setattr(pdf_to_markdown, 'convert_pdf_with_docling', fake_convert_pdf_with_docling)
 
     markdown, warnings = pdf_to_markdown.convert_pdf_to_markdown(source_pdf, pdf_to_markdown.ConvertOptions())
 
@@ -69,21 +71,24 @@ def test_convert_pdf_to_markdown_warns_when_page_range_does_not_match(monkeypatc
     assert 'expects 2 page(s)' in warnings[0].message
 
 
-def test_convert_pdf_to_markdown_accepts_string_page_numbers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """It should accept string page numbers returned by the converter."""
+def test_convert_pdf_to_markdown_strips_duplicate_title_heading(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """It should avoid duplicating a heading already emitted by Docling."""
     source_pdf = tmp_path / '08-03-02_Load_and_run_Blink_p36-37.pdf'
     source_pdf.write_bytes(b'%PDF-1.5')
 
-    def fake_to_markdown(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+        assert pdf_path == source_pdf
+        assert show_progress is False
         return [
-            {'metadata': {'page_number': '2'}, 'text': 'Second page'},
-            {'metadata': {}, 'text': 'Fallback page'},
+            pdf_to_markdown.MarkdownPage(source_page=1, text='# Load and run Blink\n\nSecond page'),
+            pdf_to_markdown.MarkdownPage(source_page=2, text='Fallback page'),
         ]
 
-    monkeypatch.setattr(pdf_to_markdown.pymupdf4llm, 'to_markdown', fake_to_markdown)
+    monkeypatch.setattr(pdf_to_markdown, 'convert_pdf_with_docling', fake_convert_pdf_with_docling)
 
     markdown, warnings = pdf_to_markdown.convert_pdf_to_markdown(source_pdf, pdf_to_markdown.ConvertOptions(page_marker='comment'))
 
+    assert markdown.count('# Load and run Blink') == 1
     assert '<!-- page: 37; source_page: 2 -->' in markdown
     assert warnings == []
 
@@ -96,12 +101,13 @@ def test_convert_path_converts_directory(monkeypatch: pytest.MonkeyPatch, tmp_pa
     (input_dir / '02_Install_p6-6.pdf').write_bytes(b'%PDF-1.5')
     (input_dir / 'notes.txt').write_text('ignored', encoding='utf-8')
 
-    def fake_to_markdown(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+        assert show_progress is False
         return [
-            {'metadata': {'page_number': 1}, 'text': f'converted from {Path(args[0]).name}'},
+            pdf_to_markdown.MarkdownPage(source_page=1, text=f'converted from {pdf_path.name}'),
         ]
 
-    monkeypatch.setattr(pdf_to_markdown.pymupdf4llm, 'to_markdown', fake_to_markdown)
+    monkeypatch.setattr(pdf_to_markdown, 'convert_pdf_with_docling', fake_convert_pdf_with_docling)
 
     result = pdf_to_markdown.convert_path(input_dir, output_dir, pdf_to_markdown.ConvertOptions())
 
@@ -118,12 +124,13 @@ def test_convert_path_preserves_relative_paths_when_recursive(monkeypatch: pytes
     (input_dir / 'a' / 'same_p1-1.pdf').write_bytes(b'%PDF-1.5')
     (input_dir / 'b' / 'same_p2-2.pdf').write_bytes(b'%PDF-1.5')
 
-    def fake_to_markdown(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+        assert show_progress is False
         return [
-            {'metadata': {'page_number': 1}, 'text': f'converted from {Path(args[0]).parent.name}'},
+            pdf_to_markdown.MarkdownPage(source_page=1, text=f'converted from {pdf_path.parent.name}'),
         ]
 
-    monkeypatch.setattr(pdf_to_markdown.pymupdf4llm, 'to_markdown', fake_to_markdown)
+    monkeypatch.setattr(pdf_to_markdown, 'convert_pdf_with_docling', fake_convert_pdf_with_docling)
 
     result = pdf_to_markdown.convert_path(input_dir, output_dir, pdf_to_markdown.ConvertOptions(), recursive=True)
 
@@ -145,10 +152,10 @@ def test_convert_path_skips_existing_files(monkeypatch: pytest.MonkeyPatch, tmp_
     existing = output_dir / '02_Install_p6-6.md'
     existing.write_text('existing', encoding='utf-8')
 
-    def fake_to_markdown(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    def fake_convert_pdf_with_docling(*args: Any, **kwargs: Any) -> list[pdf_to_markdown.MarkdownPage]:
         pytest.fail('converter should not be called for existing files')
 
-    monkeypatch.setattr(pdf_to_markdown.pymupdf4llm, 'to_markdown', fake_to_markdown)
+    monkeypatch.setattr(pdf_to_markdown, 'convert_pdf_with_docling', fake_convert_pdf_with_docling)
 
     result = pdf_to_markdown.convert_path(input_dir, output_dir, pdf_to_markdown.ConvertOptions(overwrite=False))
 
