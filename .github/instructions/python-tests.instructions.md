@@ -1,6 +1,6 @@
 ---
 applyTo: "src/tests/**/*.py"
-description: "pytest ベースのテストファイルを編集・作成するときの補足ルール。"
+description: "Python の pytest ベースのテストファイルを編集・作成するときの補足ルール。"
 ---
 
 - テストは pytest を使用する

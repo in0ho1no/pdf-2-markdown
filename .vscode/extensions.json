@@ -1,9 +1,10 @@
 {
     "recommendations": [
+        // Python環境の推奨
         "njpwerner.autodocstring",  // docstring
-        "ms-python.mypy-type-checker",  // python 型チェック
-        "ms-python.python",  // python 環境
-        "ms-python.debugpy",  // python デバッグ用
-        "charliermarsh.ruff"  // python lint formatter用
+        "ms-python.mypy-type-checker",  // Python型チェック
+        "ms-python.python",  // Python環境
+        "ms-python.debugpy",  // Pythonデバッグ用
+        "charliermarsh.ruff",  // Python lint formatter用
     ]
 }
