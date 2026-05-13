@@ -1,4 +1,4 @@
-"""Convert PDF files into RAG-friendly Markdown with PyMuPDF4LLM."""
+"""Convert PDF files into RAG-friendly Markdown with Docling."""
 
 from __future__ import annotations
 
@@ -6,12 +6,14 @@ import argparse
 import hashlib
 import importlib.metadata
 import re
+import shutil
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from tempfile import TemporaryDirectory
 
-import pymupdf4llm
+from docling.document_converter import DocumentConverter
 
 PAGE_RANGE_PATTERN = re.compile(r'_p(?P<start>\d+)-(?P<end>\d+)\.pdf$', re.IGNORECASE)
 TITLE_PREFIX_PATTERN = re.compile(r'^(?:\d{2}(?:-\d{2})*_)?')
@@ -29,7 +31,6 @@ class ConvertOptions:
     include_frontmatter: bool = True
     page_marker: str = 'both'
     overwrite: bool = True
-    show_progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,14 @@ class ConvertResult:
 
     output_paths: list[Path]
     warnings: list[ConversionWarning]
+
+
+@dataclass(frozen=True)
+class MarkdownPage:
+    """Markdown content exported for one source page."""
+
+    source_page: int
+    text: str
 
 
 def infer_metadata(pdf_path: Path) -> PdfMetadata:
@@ -93,15 +102,43 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+@lru_cache(maxsize=1)
+def get_document_converter() -> DocumentConverter:
+    """Create and cache a Docling converter instance."""
+    return DocumentConverter()
+
+
+def requires_ascii_staging(pdf_path: Path) -> bool:
+    """Return whether the path should be staged to an ASCII-only temp path."""
+    return not str(pdf_path).isascii()
+
+
+def get_ascii_staging_root() -> Path:
+    """Return a writable ASCII-only directory for staging non-ASCII input paths."""
+    candidates = (
+        Path.cwd(),
+        Path(__file__).resolve().parent,
+        Path(__file__).resolve().parent.parent,
+    )
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_dir() and str(resolved).isascii():
+            return resolved
+
+    raise ConversionError(
+        'Non-ASCII input path requires an ASCII staging directory, but no ASCII candidate directory is available.',
+    )
+
+
 def build_frontmatter(pdf_path: Path, metadata: PdfMetadata) -> str:
     """Build Markdown frontmatter for RAG ingestion."""
-    converter_version = importlib.metadata.version('pymupdf4llm')
+    converter_version = importlib.metadata.version('docling')
     lines = [
         '---',
         f'title: {yaml_string(metadata.title)}',
         f'source_pdf: {yaml_string(str(pdf_path))}',
         f'source_file: {yaml_string(pdf_path.name)}',
-        'converter: "pymupdf4llm"',
+        'converter: "docling"',
         f'converter_version: {yaml_string(converter_version)}',
         f'source_sha256: {yaml_string(file_sha256(pdf_path))}',
         'rag_ready: true',
@@ -117,28 +154,50 @@ def build_frontmatter(pdf_path: Path, metadata: PdfMetadata) -> str:
     return '\n'.join(lines)
 
 
-def extract_chunk_text(chunk: Any) -> str:
-    """Extract Markdown text from a PyMuPDF4LLM page chunk."""
-    if isinstance(chunk, dict):
-        return str(chunk.get('text', '')).strip()
-    return str(chunk).strip()
+def normalize_heading_text(value: str) -> str:
+    """Normalize heading text for loose comparisons."""
+    return re.sub(r'\s+', ' ', value.replace('\\', '')).strip().casefold()
 
 
-def extract_chunk_page_number(chunk: Any, fallback: int) -> int:
-    """Extract the 1-based page number from a PyMuPDF4LLM page chunk."""
-    if not isinstance(chunk, dict):
-        return fallback
+def strip_leading_title_heading(markdown_text: str, title: str) -> str:
+    """Avoid duplicating the title when Docling already emitted it."""
+    stripped = markdown_text.strip()
+    if not stripped:
+        return ''
 
-    metadata = chunk.get('metadata')
-    if not isinstance(metadata, dict):
-        return fallback
+    lines = stripped.splitlines()
+    first_line = lines[0].strip()
+    if not first_line.startswith('#'):
+        return stripped
 
-    page_number = metadata.get('page_number')
-    if isinstance(page_number, int):
-        return page_number
-    if isinstance(page_number, str) and page_number.isdecimal():
-        return int(page_number)
-    return fallback
+    heading_text = first_line.lstrip('#').strip()
+    if normalize_heading_text(heading_text) != normalize_heading_text(title):
+        return stripped
+
+    remainder = '\n'.join(lines[1:]).strip()
+    return remainder
+
+
+def convert_pdf_with_docling(pdf_path: Path) -> list[MarkdownPage]:
+    """Convert one PDF into per-page Markdown with Docling."""
+    if requires_ascii_staging(pdf_path):
+        staging_root = get_ascii_staging_root()
+        with TemporaryDirectory(prefix='docling-input-', dir=staging_root) as temp_dir:
+            # Fixed ASCII-only parent and filename avoid passing a non-ASCII path to Docling.
+            staged_path = Path(temp_dir) / 'input_staging_docling.pdf'
+            shutil.copy2(pdf_path, staged_path)
+            result = get_document_converter().convert(staged_path)
+    else:
+        result = get_document_converter().convert(pdf_path)
+
+    page_count = len(result.pages)
+    if page_count == 0:
+        raise ConversionError(f'Docling returned no pages for: {pdf_path}')
+
+    return [
+        MarkdownPage(source_page=page_number, text=result.document.export_to_markdown(page_no=page_number).strip())
+        for page_number in range(1, page_count + 1)
+    ]
 
 
 def expected_page_count(metadata: PdfMetadata) -> int | None:
@@ -166,29 +225,26 @@ def build_page_marker(original_page: int, source_page: int, marker_style: str) -
 def convert_pdf_to_markdown(pdf_path: Path, options: ConvertOptions) -> tuple[str, list[ConversionWarning]]:
     """Convert a PDF file to a Markdown string."""
     metadata = infer_metadata(pdf_path)
-    chunks = pymupdf4llm.to_markdown(str(pdf_path), page_chunks=True, show_progress=options.show_progress)
-    if isinstance(chunks, str):
-        chunks = [{'metadata': {'page_number': 1}, 'text': chunks}]
+    pages = convert_pdf_with_docling(pdf_path)
 
     warnings: list[ConversionWarning] = []
     expected_pages = expected_page_count(metadata)
-    if expected_pages is not None and expected_pages != len(chunks):
+    if expected_pages is not None and expected_pages != len(pages):
         warnings.append(
             ConversionWarning(
                 pdf_path=pdf_path,
-                message=f'Filename page range expects {expected_pages} page(s), but converter returned {len(chunks)} chunk(s).',
+                message=f'Filename page range expects {expected_pages} page(s), but converter returned {len(pages)} page(s).',
             ),
         )
 
     body_parts: list[str] = []
-    for index, chunk in enumerate(chunks, start=1):
-        source_page = extract_chunk_page_number(chunk, fallback=index)
-        original_page = source_page
+    for page in pages:
+        original_page = page.source_page
         if metadata.original_page_start is not None:
-            original_page = metadata.original_page_start + source_page - 1
+            original_page = metadata.original_page_start + page.source_page - 1
 
-        text = extract_chunk_text(chunk)
-        page_marker = build_page_marker(original_page, source_page, options.page_marker)
+        text = strip_leading_title_heading(page.text, metadata.title)
+        page_marker = build_page_marker(original_page, page.source_page, options.page_marker)
         if page_marker:
             body_parts.append(f'{page_marker}\n\n{text}')
         elif text:
@@ -261,7 +317,6 @@ def parse_args() -> argparse.Namespace:
         default='both',
         help='Page marker style. "both" keeps source pages even if HTML comments are removed by a Markdown loader.',
     )
-    parser.add_argument('--show-progress', action='store_true', help='Show PyMuPDF4LLM page processing progress.')
     return parser.parse_args()
 
 
@@ -272,7 +327,6 @@ def run_cli() -> int:
         include_frontmatter=not args.no_frontmatter,
         page_marker=args.page_marker,
         overwrite=not args.skip_existing,
-        show_progress=args.show_progress,
     )
     try:
         result = convert_path(args.input_path, args.output_dir, options, recursive=args.recursive)

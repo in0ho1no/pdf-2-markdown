@@ -2,7 +2,7 @@
 
 章・節単位に分割済みのPDFを、RAGで扱いやすいMarkdownへ変換するツールです。
 
-このツールは、`pdf-toc-splitter` でPDFを先に分割しておき、その分割済みPDFを1ファイルずつMarkdown化する前提で作っています。変換エンジンには `PyMuPDF4LLM` を使用します。
+このツールは、`pdf-toc-splitter` でPDFを先に分割しておき、その分割済みPDFを1ファイルずつMarkdown化する前提で作っています。変換エンジンには `Docling` を使用します。
 
 ## できること
 
@@ -87,8 +87,8 @@ Markdownの先頭にはfrontmatterを付与します。
 title: "Load and run Blink"
 source_pdf: "D:\\work\\14_pdf-toc-splitter\\...\08-03-02_Load_and_run_Blink_p36-37.pdf"
 source_file: "08-03-02_Load_and_run_Blink_p36-37.pdf"
-converter: "pymupdf4llm"
-converter_version: "1.27.2.3"
+converter: "docling"
+converter_version: "2.93.0"
 source_sha256: "..."
 rag_ready: true
 original_page_start: 36
@@ -128,7 +128,7 @@ original_page_end: 37
 
 ## RAG投入前の確認ポイント
 
-PyMuPDF4LLMはRAG向けのMarkdown化に向いていますが、PDFの構造によっては変換結果の確認が必要です。
+DoclingはRAG向けのMarkdown化に向いていますが、PDFの構造によっては変換結果の確認が必要です。
 
 - 表がMarkdown表として扱いやすい形になっているか
 - コマンド例やコードブロックの改行が崩れていないか
