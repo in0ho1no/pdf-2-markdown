@@ -27,9 +27,8 @@ def test_convert_pdf_to_markdown_adds_rag_metadata(monkeypatch: pytest.MonkeyPat
     source_pdf = tmp_path / '01_1._Introduction_p5-5.pdf'
     source_pdf.write_bytes(b'%PDF-1.5')
 
-    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+    def fake_convert_pdf_with_docling(pdf_path: Path) -> list[pdf_to_markdown.MarkdownPage]:
         assert pdf_path == source_pdf
-        assert show_progress is False
         return [
             pdf_to_markdown.MarkdownPage(source_page=1, text='Chapter body'),
         ]
@@ -55,9 +54,8 @@ def test_convert_pdf_to_markdown_warns_when_page_range_does_not_match(monkeypatc
     source_pdf = tmp_path / '08-03-02_Load_and_run_Blink_p36-37.pdf'
     source_pdf.write_bytes(b'%PDF-1.5')
 
-    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+    def fake_convert_pdf_with_docling(pdf_path: Path) -> list[pdf_to_markdown.MarkdownPage]:
         assert pdf_path == source_pdf
-        assert show_progress is False
         return [
             pdf_to_markdown.MarkdownPage(source_page=1, text='Only one chunk'),
         ]
@@ -76,9 +74,8 @@ def test_convert_pdf_to_markdown_strips_duplicate_title_heading(monkeypatch: pyt
     source_pdf = tmp_path / '08-03-02_Load_and_run_Blink_p36-37.pdf'
     source_pdf.write_bytes(b'%PDF-1.5')
 
-    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
+    def fake_convert_pdf_with_docling(pdf_path: Path) -> list[pdf_to_markdown.MarkdownPage]:
         assert pdf_path == source_pdf
-        assert show_progress is False
         return [
             pdf_to_markdown.MarkdownPage(source_page=1, text='# Load and run Blink\n\nSecond page'),
             pdf_to_markdown.MarkdownPage(source_page=2, text='Fallback page'),
@@ -93,6 +90,39 @@ def test_convert_pdf_to_markdown_strips_duplicate_title_heading(monkeypatch: pyt
     assert warnings == []
 
 
+def test_convert_pdf_with_docling_stages_non_ascii_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """It should copy a non-ASCII-path PDF to a temp ASCII location before passing to Docling."""
+    source_pdf = tmp_path / '日本語_p1-2.pdf'
+    source_pdf.write_bytes(b'%PDF-1.5')
+
+    captured_paths: list[Path] = []
+
+    class FakeDocument:
+        def export_to_markdown(self, *, page_no: int) -> str:
+            return f'page {page_no}'
+
+    class FakeConversionResult:
+        def __init__(self) -> None:
+            self.pages: list[object] = [object()]
+            self.document = FakeDocument()
+
+    class FakeConverter:
+        def convert(self, path: Path) -> FakeConversionResult:
+            captured_paths.append(path)
+            return FakeConversionResult()
+
+    monkeypatch.setattr(pdf_to_markdown, 'get_document_converter', lambda: FakeConverter())
+
+    pages = pdf_to_markdown.convert_pdf_with_docling(source_pdf)
+
+    assert len(pages) == 1
+    assert len(captured_paths) == 1
+    staged_path = captured_paths[0]
+    assert str(staged_path).isascii()
+    assert staged_path.name == 'input_staging_docling.pdf'
+    assert staged_path != source_pdf
+
+
 def test_convert_path_converts_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """It should convert every PDF in a directory to Markdown files."""
     input_dir = tmp_path / 'chapters'
@@ -101,8 +131,7 @@ def test_convert_path_converts_directory(monkeypatch: pytest.MonkeyPatch, tmp_pa
     (input_dir / '02_Install_p6-6.pdf').write_bytes(b'%PDF-1.5')
     (input_dir / 'notes.txt').write_text('ignored', encoding='utf-8')
 
-    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
-        assert show_progress is False
+    def fake_convert_pdf_with_docling(pdf_path: Path) -> list[pdf_to_markdown.MarkdownPage]:
         return [
             pdf_to_markdown.MarkdownPage(source_page=1, text=f'converted from {pdf_path.name}'),
         ]
@@ -124,8 +153,7 @@ def test_convert_path_preserves_relative_paths_when_recursive(monkeypatch: pytes
     (input_dir / 'a' / 'same_p1-1.pdf').write_bytes(b'%PDF-1.5')
     (input_dir / 'b' / 'same_p2-2.pdf').write_bytes(b'%PDF-1.5')
 
-    def fake_convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[pdf_to_markdown.MarkdownPage]:
-        assert show_progress is False
+    def fake_convert_pdf_with_docling(pdf_path: Path) -> list[pdf_to_markdown.MarkdownPage]:
         return [
             pdf_to_markdown.MarkdownPage(source_page=1, text=f'converted from {pdf_path.parent.name}'),
         ]

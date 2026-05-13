@@ -31,7 +31,6 @@ class ConvertOptions:
     include_frontmatter: bool = True
     page_marker: str = 'both'
     overwrite: bool = True
-    show_progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -111,7 +110,7 @@ def get_document_converter() -> DocumentConverter:
 
 def requires_ascii_staging(pdf_path: Path) -> bool:
     """Return whether the path should be staged to an ASCII-only temp path."""
-    return any(ord(character) > 127 for character in str(pdf_path))
+    return not str(pdf_path).isascii()
 
 
 def build_frontmatter(pdf_path: Path, metadata: PdfMetadata) -> str:
@@ -162,13 +161,12 @@ def strip_leading_title_heading(markdown_text: str, title: str) -> str:
     return remainder
 
 
-def convert_pdf_with_docling(pdf_path: Path, show_progress: bool) -> list[MarkdownPage]:
+def convert_pdf_with_docling(pdf_path: Path) -> list[MarkdownPage]:
     """Convert one PDF into per-page Markdown with Docling."""
-    del show_progress
-
     if requires_ascii_staging(pdf_path):
         with TemporaryDirectory(prefix='docling-input-') as temp_dir:
-            staged_path = Path(temp_dir) / 'input.pdf'
+            # Fixed ASCII-only name avoids the same non-ASCII problem on the staged path itself.
+            staged_path = Path(temp_dir) / 'input_staging_docling.pdf'
             shutil.copy2(pdf_path, staged_path)
             result = get_document_converter().convert(staged_path)
     else:
@@ -209,7 +207,7 @@ def build_page_marker(original_page: int, source_page: int, marker_style: str) -
 def convert_pdf_to_markdown(pdf_path: Path, options: ConvertOptions) -> tuple[str, list[ConversionWarning]]:
     """Convert a PDF file to a Markdown string."""
     metadata = infer_metadata(pdf_path)
-    pages = convert_pdf_with_docling(pdf_path, show_progress=options.show_progress)
+    pages = convert_pdf_with_docling(pdf_path)
 
     warnings: list[ConversionWarning] = []
     expected_pages = expected_page_count(metadata)
@@ -301,7 +299,6 @@ def parse_args() -> argparse.Namespace:
         default='both',
         help='Page marker style. "both" keeps source pages even if HTML comments are removed by a Markdown loader.',
     )
-    parser.add_argument('--show-progress', action='store_true', help='Show conversion progress when supported by the backend.')
     return parser.parse_args()
 
 
@@ -312,7 +309,6 @@ def run_cli() -> int:
         include_frontmatter=not args.no_frontmatter,
         page_marker=args.page_marker,
         overwrite=not args.skip_existing,
-        show_progress=args.show_progress,
     )
     try:
         result = convert_path(args.input_path, args.output_dir, options, recursive=args.recursive)
